@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KRASNOV // Drift Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0c0c0c;
+  --bg2:#111;
+  --bg3:#161616;
+  --border:#222;
+  --border2:#2c2c2c;
+  --text:#e0e0e0;
+  --text2:#888;
+  --text3:#444;
+  --red:#d63031;
+  --red2:#ff4757;
+  --green:#00b894;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'Inter',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;font-size:14px;line-height:1.5}
+
+/* HEADER */
+header{height:52px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;background:var(--bg);z-index:100}
+.logo{font-family:var(--mono);font-size:13px;font-weight:500;letter-spacing:2px;color:var(--text)}
+.logo span{color:var(--red)}
+.hud{display:flex;gap:24px;align-items:center}
+.hud-item{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+.hud-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase}
+.hud-val{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--text)}
+.hud-val.red{color:var(--red2)}
+
+/* TABS */
+.tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg)}
+.tab{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);padding:12px 20px;cursor:pointer;border-bottom:1px solid transparent;transition:all .15s;margin-bottom:-1px}
+.tab:hover{color:var(--text2)}
+.tab.active{color:var(--text);border-bottom-color:var(--red)}
+
+/* LAYOUT */
+.container{max-width:1100px;margin:0 auto;padding:24px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+
+/* UPLOAD SLOTS */
+.upload-slot{border:1px solid var(--border);background:var(--bg2);padding:20px;cursor:pointer;transition:all .15s;position:relative}
+.upload-slot:hover{border-color:var(--border2)}
+.upload-slot.has-file{border-color:var(--green)}
+.upload-slot.drag-over{border-color:var(--red);background:var(--bg3)}
+.slot-type{font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--text3);text-transform:uppercase;margin-bottom:8px}
+.slot-name{font-size:13px;font-weight:500;color:var(--text);margin-bottom:4px}
+.slot-desc{font-size:12px;color:var(--text3);margin-bottom:12px}
+.slot-status{font-family:var(--mono);font-size:11px;color:var(--text3)}
+.slot-status.ok{color:var(--green)}
+.slot-status.err{color:var(--red2)}
+.slot-dot{width:6px;height:6px;border-radius:50%;background:var(--border2);position:absolute;top:16px;right:16px}
+.slot-dot.ok{background:var(--green)}
+label.slot-btn{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text2);border:1px solid var(--border2);padding:5px 12px;cursor:pointer;transition:all .15s}
+label.slot-btn:hover{border-color:var(--text2);color:var(--text)}
+
+/* FIELDS ROW */
+.fields-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field-label{font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3)}
+.field-input{background:var(--bg2);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:12px;padding:7px 10px;outline:none;transition:border-color .15s;width:100%}
+.field-input:focus{border-color:var(--border2)}
+.field-input::placeholder{color:var(--text3)}
+.field-input[readonly]{color:var(--green);cursor:default}
+
+/* VIDEO PREVIEW */
+.video-wrap{display:none;border:1px solid var(--border);margin-bottom:16px;background:#000}
+.video-wrap video{width:100%;max-height:360px;display:block}
+.video-meta{padding:8px 12px;display:flex;justify-content:space-between;align-items:center;background:var(--bg2);border-top:1px solid var(--border)}
+.video-meta span{font-family:var(--mono);font-size:11px;color:var(--text3)}
+
+/* ANALYZE BTN */
+.analyze-btn{width:100%;background:var(--red);color:#fff;border:none;padding:12px;font-family:var(--mono);font-size:12px;letter-spacing:4px;text-transform:uppercase;cursor:pointer;transition:opacity .15s;margin-bottom:20px}
+.analyze-btn:hover:not(:disabled){opacity:.85}
+.analyze-btn:disabled{background:var(--bg3);color:var(--text3);cursor:not-allowed}
+
+/* LOADING */
+.loading{display:none;border:1px solid var(--border);background:var(--bg2);padding:40px;text-align:center;margin-bottom:20px}
+.loading-bar{height:1px;background:var(--border);margin:16px auto 0;max-width:200px;position:relative;overflow:hidden}
+.loading-bar::after{content:'';position:absolute;inset:0;background:var(--red);animation:slide 1.2s ease-in-out infinite;transform:translateX(-100%)}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.loading-title{font-family:var(--mono);font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--text2)}
+.loading-step{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px}
+
+/* ERROR */
+.error-box{display:none;border:1px solid rgba(214,48,49,.3);background:rgba(214,48,49,.05);padding:10px 14px;font-family:var(--mono);font-size:11px;color:var(--red2);margin-bottom:16px}
+
+/* RESULT */
+.result{display:none;border:1px solid var(--border);margin-bottom:20px}
+.result-header{display:flex;align-items:flex-start;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.result-pilot{font-size:16px;font-weight:600;color:var(--text);letter-spacing:.5px}
+.result-meta{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:3px;letter-spacing:1px}
+.result-score-wrap{text-align:right}
+.result-score{font-family:var(--mono);font-size:40px;font-weight:500;color:var(--red2);line-height:1}
+.result-score-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:1px}
+
+/* TELEM STATS */
+.telem-stats{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--border)}
+.tstat{padding:14px 16px;border-right:1px solid var(--border);text-align:center}
+.tstat:last-child{border-right:none}
+.tstat-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px}
+.tstat-val{font-family:var(--mono);font-size:18px;font-weight:500;color:var(--text)}
+.tstat-unit{font-family:var(--mono);font-size:10px;color:var(--text3)}
+
+/* SCORES */
+.scores{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border)}
+.score-cell{padding:16px;border-right:1px solid var(--border);text-align:center}
+.score-cell:last-child{border-right:none}
+.score-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px}
+.score-num{font-family:var(--mono);font-size:28px;font-weight:500;line-height:1;margin-bottom:8px}
+.score-bar{height:2px;background:var(--border)}
+.score-bar-fill{height:100%;transition:width 1s ease;width:0}
+
+/* BREAKDOWN */
+.breakdown{padding:16px 20px;border-bottom:1px solid var(--border)}
+.breakdown-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.source-tag{font-family:var(--mono);font-size:9px;padding:2px 6px;letter-spacing:1px;text-transform:uppercase}
+.source-telem{background:rgba(0,184,148,.1);color:var(--green);border:1px solid rgba(0,184,148,.2)}
+.source-ai{background:rgba(214,48,49,.1);color:var(--red2);border:1px solid rgba(214,48,49,.2)}
+.breakdown-text{font-size:13px;line-height:1.7;color:var(--text2);padding-left:12px;border-left:2px solid var(--border2)}
+
+/* MMR */
+.mmr-row{display:flex;align-items:center;gap:24px;padding:12px 20px;background:var(--bg2)}
+.mmr-item{display:flex;flex-direction:column;gap:2px}
+.mmr-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase}
+.mmr-val{font-family:var(--mono);font-size:14px;font-weight:500;color:var(--text)}
+.mmr-delta{font-family:var(--mono);font-size:14px;font-weight:500}
+.mmr-delta.up{color:var(--green)}
+.mmr-delta.down{color:var(--red2)}
+.rank-tag{font-family:var(--mono);font-size:10px;letter-spacing:2px;padding:3px 8px;border:1px solid var(--border2);color:var(--text2);text-transform:uppercase}
+
+/* HISTORY */
+.panel{border:1px solid var(--border)}
+.panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.panel-title{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text2)}
+.panel-count{font-family:var(--mono);font-size:10px;color:var(--text3)}
+.empty{padding:32px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--text3);letter-spacing:1px}
+.run-row{display:grid;grid-template-columns:28px 1fr auto auto auto;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);transition:background .1s}
+.run-row:last-child{border-bottom:none}
+.run-row:hover{background:var(--bg2)}
+.run-idx{font-family:var(--mono);font-size:10px;color:var(--text3);text-align:right}
+.run-pilot{font-size:13px;font-weight:500;color:var(--text)}
+.run-sub{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:1px}
+.run-date{font-family:var(--mono);font-size:10px;color:var(--text3)}
+.run-score{font-family:var(--mono);font-size:14px;font-weight:500;color:var(--red2);min-width:32px;text-align:center}
+.run-mmr{font-family:var(--mono);font-size:11px;color:var(--text3);text-align:right;min-width:56px}
+
+/* LEADERBOARD */
+.lb-row{display:grid;grid-template-columns:40px 1fr auto auto;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);transition:background .1s}
+.lb-row:last-child{border-bottom:none}
+.lb-row:hover{background:var(--bg2)}
+.lb-pos{font-family:var(--mono);font-size:14px;font-weight:500;text-align:center;color:var(--text3)}
+.lb-pos.p1{color:#f9ca24}
+.lb-pos.p2{color:#b2bec3}
+.lb-pos.p3{color:#cd7f32}
+.lb-name{font-size:13px;font-weight:500;color:var(--text)}
+.lb-sub{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:1px}
+.lb-best{font-family:var(--mono);font-size:16px;font-weight:500;color:var(--red2)}
+.lb-mmr-col{font-family:var(--mono);font-size:11px;color:var(--text2);text-align:right}
+.lb-rank{font-size:9px;color:var(--text3);margin-top:2px;letter-spacing:1px}
+
+.btn-sm{background:none;border:1px solid var(--border);color:var(--text3);padding:4px 10px;font-family:var(--mono);font-size:10px;letter-spacing:1px;cursor:pointer;transition:all .15s}
+.btn-sm:hover{border-color:var(--border2);color:var(--text2)}
+
+.section-label{font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);margin-bottom:8px}
+
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+@media(max-width:768px){
+  .grid-3,.fields-row{grid-template-columns:1fr}
+  .scores,.telem-stats{grid-template-columns:repeat(2,1fr)}
+  .grid-2{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">KRASNOV<span>//</span>DRIFT</div>
+  <div class="hud">
+    <div class="hud-item"><span class="hud-label">Пилот</span><span class="hud-val" id="hPilot">—</span></div>
+    <div class="hud-item"><span class="hud-label">MMR</span><span class="hud-val red" id="hMmr">—</span></div>
+    <div class="hud-item"><span class="hud-label">Заездов</span><span class="hud-val" id="hRuns">0</span></div>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('analyze')">Анализ</div>
+  <div class="tab" onclick="switchTab('history')">История</div>
+  <div class="tab" onclick="switchTab('leaderboard')">Лидерборд</div>
+</div>
+
+<div class="container">
+
+  <!-- ANALYZE TAB -->
+  <div class="tab-content active" id="tab-analyze">
+
+    <!-- Upload slots -->
+    <div class="section-label">Загрузка данных</div>
+    <div class="grid-3">
+
+      <!-- log.json -->
+      <div class="upload-slot" id="slotLog" ondragover="dov(event,'log')" ondragleave="dol('log')" ondrop="dod(event,'log')">
+        <div class="slot-dot" id="dotLog"></div>
+        <div class="slot-type">Метаданные</div>
+        <div class="slot-name">log.json</div>
+        <div class="slot-desc">Авто-заполнение пилота, машины, трассы</div>
+        <label class="slot-btn" for="fileLog">Выбрать файл</label>
+        <input type="file" id="fileLog" accept=".json" style="display:none" onchange="loadLog(this.files[0])">
+        <div class="slot-status" id="statusLog">ожидание</div>
+      </div>
+
+      <!-- lap.txt -->
+      <div class="upload-slot" id="slotTelem" ondragover="dov(event,'telem')" ondragleave="dol('telem')" ondrop="dod(event,'telem')">
+        <div class="slot-dot" id="dotTelem"></div>
+        <div class="slot-type">Телеметрия</div>
+        <div class="slot-name">lap_N.txt</div>
+        <div class="slot-desc">Данные скорости, слипа, G-force, газа</div>
+        <label class="slot-btn" for="fileTelem">Выбрать файл</label>
+        <input type="file" id="fileTelem" accept=".txt,.csv" style="display:none" onchange="loadTelem(this.files[0])">
+        <div class="slot-status" id="statusTelem">ожидание</div>
+      </div>
+
+      <!-- video -->
+      <div class="upload-slot" id="slotVideo" ondragover="dov(event,'video')" ondragleave="dol('video')" ondrop="dod(event,'video')">
+        <div class="slot-dot" id="dotVideo"></div>
+        <div class="slot-type">Опционально</div>
+        <div class="slot-name">Видео заезда</div>
+        <div class="slot-desc">MP4 · MOV · до 200 МБ</div>
+        <label class="slot-btn" for="fileVideo">Выбрать файл</label>
+        <input type="file" id="fileVideo" accept="video/*" style="display:none" onchange="loadVideo(this.files[0])">
+        <div class="slot-status" id="statusVideo">ожидание</div>
+      </div>
+
+    </div>
+
+    <!-- Video preview -->
+    <div class="video-wrap" id="videoWrap">
+      <video id="videoEl" controls></video>
+      <div class="video-meta">
+        <span id="videoName">—</span>
+        <button class="btn-sm" onclick="clearVideo()">Убрать</button>
+      </div>
+    </div>
+
+    <!-- Fields -->
+    <div class="section-label">Данные заезда</div>
+    <div class="fields-row">
+      <div class="field">
+        <span class="field-label">Пилот</span>
+        <input class="field-input" id="fPilot" placeholder="KRASNOV" maxlength="30" oninput="updateHeader()">
+      </div>
+      <div class="field">
+        <span class="field-label">Трасса</span>
+        <input class="field-input" id="fTrack" placeholder="Бикерниеки — Конфинг" maxlength="60">
+      </div>
+      <div class="field">
+        <span class="field-label">Машина</span>
+        <input class="field-input" id="fCar" placeholder="VDT Silvia S15 600hp" maxlength="60">
+      </div>
+    </div>
+
+    <div class="error-box" id="errBox"></div>
+
+    <button class="analyze-btn" id="analyzeBtn" onclick="analyze()" disabled>
+      Анализировать заезд
+    </button>
+
+    <!-- Loading -->
+    <div class="loading" id="loading">
+      <div class="loading-title">Анализ данных</div>
+      <div class="loading-step" id="loadStep">инициализация...</div>
+      <div class="loading-bar"></div>
+    </div>
+
+    <!-- Result -->
+    <div class="result" id="result">
+      <div class="result-header">
+        <div>
+          <div class="result-pilot" id="rPilot">—</div>
+          <div class="result-meta" id="rMeta">—</div>
+        </div>
+        <div class="result-score-wrap">
+          <div class="result-score-label">Общий балл</div>
+          <div class="result-score" id="rScore">—</div>
+          <div class="result-score-label">/100</div>
+        </div>
+      </div>
+
+      <div class="telem-stats" id="telemStats" style="display:none">
+        <div class="tstat"><div class="tstat-label">Макс скорость</div><div class="tstat-val" id="tSpeed">—</div><div class="tstat-unit">км/ч</div></div>
+        <div class="tstat"><div class="tstat-label">Средний газ</div><div class="tstat-val" id="tThrottle">—</div><div class="tstat-unit">%</div></div>
+        <div class="tstat"><div class="tstat-label">Макс слип угол</div><div class="tstat-val" id="tSlip">—</div><div class="tstat-unit">°</div></div>
+        <div class="tstat"><div class="tstat-label">Боковой G</div><div class="tstat-val" id="tLatG">—</div><div class="tstat-unit">среднее</div></div>
+        <div class="tstat"><div class="tstat-label">Точек данных</div><div class="tstat-val" id="tSamples">—</div><div class="tstat-unit">сэмплов</div></div>
+      </div>
+
+      <div class="scores">
+        <div class="score-cell">
+          <div class="score-label">Траектория</div>
+          <div class="score-num" id="sT" style="color:#e17055">—</div>
+          <div class="score-bar"><div class="score-bar-fill" id="bT" style="background:#e17055"></div></div>
+        </div>
+        <div class="score-cell">
+          <div class="score-label">Угол сноса</div>
+          <div class="score-num" id="sA" style="color:#fdcb6e">—</div>
+          <div class="score-bar"><div class="score-bar-fill" id="bA" style="background:#fdcb6e"></div></div>
+        </div>
+        <div class="score-cell">
+          <div class="score-label">Скорость</div>
+          <div class="score-num" id="sS" style="color:#a29bfe">—</div>
+          <div class="score-bar"><div class="score-bar-fill" id="bS" style="background:#a29bfe"></div></div>
+        </div>
+        <div class="score-cell">
+          <div class="score-label">Стабильность</div>
+          <div class="score-num" id="sSt" style="color:#00b894">—</div>
+          <div class="score-bar"><div class="score-bar-fill" id="bSt" style="background:#00b894"></div></div>
+        </div>
+      </div>
+
+      <div class="breakdown">
+        <div class="breakdown-label">
+          Разбор
+          <span class="source-tag" id="srcTag">—</span>
+        </div>
+        <div class="breakdown-text" id="rBreakdown"></div>
+      </div>
+
+      <div class="mmr-row">
+        <div class="mmr-item"><span class="mmr-label">Изменение MMR</span><span class="mmr-delta" id="mDelta">—</span></div>
+        <div class="mmr-item"><span class="mmr-label">Текущий MMR</span><span class="mmr-val" id="mTotal">—</span></div>
+        <div class="rank-tag" id="mRank">—</div>
+      </div>
+    </div>
+
+    <!-- History preview -->
+    <div class="section-label">Последние заезды</div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Журнал</span>
+        <span class="panel-count" id="runCount">0 заездов</span>
+      </div>
+      <div id="histList"><div class="empty">// нет данных</div></div>
+    </div>
+
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div class="tab-content" id="tab-history">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Все заезды</span>
+        <button class="btn-sm" onclick="clearHistory()">Очистить</button>
+      </div>
+      <div id="fullHistList"><div class="empty">// нет данных</div></div>
+    </div>
+  </div>
+
+  <!-- LEADERBOARD TAB -->
+  <div class="tab-content" id="tab-leaderboard">
+    <div class="panel">
+      <div class="panel-header"><span class="panel-title">Лидерборд</span></div>
+      <div id="lbList"><div class="empty">// нет данных</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// STATE
+let vFile=null, vB64=null, tData=null, lData=null;
+let history=JSON.parse(localStorage.getItem('kds2_hist')||'[]');
+let players=JSON.parse(localStorage.getItem('kds2_players')||'{}');
+
+// TABS
+function switchTab(n){
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['analyze','history','leaderboard'][i]===n));
+  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+  document.getElementById('tab-'+n).classList.add('active');
+  if(n==='history')renderFull();
+  if(n==='leaderboard')renderLb();
+}
+
+// DRAG DROP
+function dov(e,t){e.preventDefault();document.getElementById('slot'+cap(t)).classList.add('drag-over')}
+function dol(t){document.getElementById('slot'+cap(t)).classList.remove('drag-over')}
+function dod(e,t){e.preventDefault();dol(t);const f=e.dataTransfer.files[0];if(f){if(t==='log')loadLog(f);else if(t==='telem')loadTelem(f);else loadVideo(f)}}
+function cap(s){return s.charAt(0).toUpperCase()+s.slice(1)}
+
+// LOG.JSON
+function loadLog(file){
+  if(!file)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      lData=JSON.parse(e.target.result);
+      // Auto-fill fields
+      const pilot=lData.event?.driver||'';
+      const car=lData.event?.vehicle||'';
+      const track=lData.event?.venue||'';
+      const carDesc=lData.detailData?.find(d=>d.id==='Vehicle Desc')?.value||car;
+      const hp=lData.mathItems?.find(m=>m.name==='Max ICE Power')?.value||0;
+
+      if(pilot&&!document.getElementById('fPilot').value)document.getElementById('fPilot').value=pilot;
+      if(carDesc&&!document.getElementById('fCar').value)document.getElementById('fCar').value=hp?`${carDesc.split(',')[1]?.trim()||car} ${Math.round(hp)}hp`:carDesc;
+      if(track&&!document.getElementById('fTrack').value)document.getElementById('fTrack').value=track.replace('drift_vdc','Конфинг').replace(/_/g,' ');
+
+      setSlot('Log','ok',file.name);
+      updateHeader();
+      checkReady();
+    }catch(err){setSlot('Log','err','Ошибка парсинга JSON')}
+  };
+  r.readAsText(file);
+}
+
+// LAP TXT
+function loadTelem(file){
+  if(!file)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    tData=parseTelem(e.target.result,lData);
+    setSlot('Telem','ok',`${file.name} · ${tData.samples} сэмплов`);
+    checkReady();
+  };
+  r.readAsText(file);
+}
+
+function parseTelem(text, logData){
+  // Get channel order from log.json if available
+  const ch30=logData?.channelOrder?.['30']||[];
+  const ch50=logData?.channelOrder?.['50']||[];
+
+  // Find indices
+  const idx=(arr,name)=>arr.indexOf(name);
+
+  // #30# channels (offset by 2: tag + timestamp)
+  const i30={
+    throttle: idx(ch30,'throttle'),
+    brake: idx(ch30,'brake'),
+    speed: idx(ch30,'speed'),
+    rpm: idx(ch30,'rpm'),
+    gear: idx(ch30,'gear'),
+    steer: idx(ch30,'steerAngle'),
+    slipFL: idx(ch30,'ndslipfl'),
+    slipFR: idx(ch30,'ndslipfr'),
+    slipRL: idx(ch30,'ndsliprl'),
+    slipRR: idx(ch30,'ndsliprr'),
+    slipAngFL: idx(ch30,'tireslipanglefl'),
+    slipAngFR: idx(ch30,'tireslipanglefr'),
+    slipAngRL: idx(ch30,'tireslipanglerl'),
+    slipAngRR: idx(ch30,'tireslipanglerr'),
+  };
+
+  // #50# channels
+  const i50={
+    latG: idx(ch50,'cgaccellat'),
+    lonG: idx(ch50,'cgaccellong'),
+    steerTorque: idx(ch50,'steerTorque'),
+  };
+
+  const speeds=[],throttles=[],brakes=[],slips=[],slipAngles=[],latGs=[],gears=[];
+  const lines=text.split('\n');
+
+  for(const line of lines){
+    const p=line.trim().split(';');
+    if(p.length<3)continue;
+    try{
+      if(p[0]==='#30#'){
+        const get=(i)=>i>=0?parseFloat(p[i+2])||0:0;
+        speeds.push(Math.abs(get(i30.speed)));
+        throttles.push(get(i30.throttle));
+        brakes.push(get(i30.brake));
+        slips.push(Math.abs(get(i30.slipFL)));
+        slips.push(Math.abs(get(i30.slipRL)));
+        if(i30.slipAngRL>=0)slipAngles.push(Math.abs(get(i30.slipAngRL)));
+        if(i30.slipAngRR>=0)slipAngles.push(Math.abs(get(i30.slipAngRR)));
+        if(i30.gear>=0)gears.push(get(i30.gear));
+      }
+      if(p[0]==='#50#'){
+        const get=(i)=>i>=0?parseFloat(p[i+2])||0:0;
+        latGs.push(Math.abs(get(i50.latG)));
+      }
+    }catch(e){}
+  }
+
+  const avg=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
+  const max=a=>a.length?Math.max(...a):0;
+
+  return{
+    samples:speeds.length,
+    maxSpeed:max(speeds),
+    avgSpeed:avg(speeds),
+    avgThrottle:avg(throttles)*100,
+    avgBrake:avg(brakes)*100,
+    maxSlip:max(slips),
+    avgSlip:avg(slips),
+    maxSlipAngle:max(slipAngles),
+    avgSlipAngle:avg(slipAngles),
+    avgLatG:avg(latGs),
+    maxLatG:max(latGs),
+  };
+}
+
+// VIDEO
+function loadVideo(file){
+  if(!file||!file.type.startsWith('video/'))return;
+  if(file.size>200*1024*1024){showErr('Макс 200МБ');return}
+  vFile=file;
+  document.getElementById('videoEl').src=URL.createObjectURL(file);
+  document.getElementById('videoName').textContent=file.name;
+  document.getElementById('videoWrap').style.display='block';
+  setSlot('Video','ok',file.name);
+  const r=new FileReader();r.onload=e=>{vB64=e.target.result.split(',')[1]};r.readAsDataURL(file);
+  checkReady();
+}
+function clearVideo(){vFile=null;vB64=null;document.getElementById('videoWrap').style.display='none';document.getElementById('fileVideo').value='';setSlot('Video','','ожидание');checkReady()}
+
+// UTILS
+function setSlot(name,state,msg){
+  const dot=document.getElementById('dot'+name);
+  const status=document.getElementById('status'+name);
+  const slot=document.getElementById('slot'+name);
+  dot.className='slot-dot'+(state==='ok'?' ok':state==='err'?' err':'');
+  status.className='slot-status'+(state==='ok'?' ok':state==='err'?' err':'');
+  status.textContent=msg||'ожидание';
+  slot.classList.toggle('has-file',state==='ok');
+}
+function checkReady(){document.getElementById('analyzeBtn').disabled=!(vFile||tData)}
+function showErr(m){const e=document.getElementById('errBox');e.textContent=m;e.style.display='block'}
+function hideErr(){document.getElementById('errBox').style.display='none'}
+function updateHeader(){
+  const n=document.getElementById('fPilot').value.trim();
+  document.getElementById('hPilot').textContent=n||'—';
+  if(players[n]){document.getElementById('hMmr').textContent=players[n].mmr;document.getElementById('hRuns').textContent=players[n].runs}
+}
+
+// SCORE FROM TELEMETRY
+function scoreFromTelem(t){
+  // Угол — на основе реального slip angle задних колёс (в градусах)
+  const angleScore=Math.min(100,Math.round(
+    t.avgSlipAngle>0 ? Math.min(100, t.avgSlipAngle*3.5 + (t.maxSlipAngle>30?10:0)) :
+    Math.min(100, t.avgSlip*10)
+  ));
+
+  // Скорость
+  const speedScore=Math.min(100,Math.round(t.maxSpeed*0.6+t.avgSpeed*0.25));
+
+  // Стабильность — высокий газ + стабильный угол
+  const stabScore=Math.min(100,Math.round(
+    40 + (t.avgThrottle>80?20:t.avgThrottle>60?10:0) +
+    (t.maxSlipAngle>0&&t.maxSlipAngle<60?20:10) +
+    (t.avgLatG>1&&t.avgLatG<5?20:10)
+  ));
+
+  // Траектория — оцениваем через боковой G и использование трассы
+  const trajScore=Math.min(100,Math.round(
+    35 + Math.min(30,t.avgLatG*6) + Math.min(20,t.avgSlipAngle*1.5) + (t.avgThrottle>70?15:5)
+  ));
+
+  const overall=Math.round(angleScore*0.35+speedScore*0.25+stabScore*0.2+trajScore*0.2);
+  return{trajectory:trajScore,angle:angleScore,speed:speedScore,stability:stabScore,overall:Math.min(100,overall)};
+}
+
+// ANALYZE
+async function analyze(){
+  const pilot=document.getElementById('fPilot').value.trim()||'Пилот';
+  const track=document.getElementById('fTrack').value.trim()||'Бикерниеки';
+  const car=document.getElementById('fCar').value.trim()||'VDT Silvia';
+
+  document.getElementById('analyzeBtn').disabled=true;
+  document.getElementById('result').style.display='none';
+  document.getElementById('loading').style.display='block';
+  hideErr();
+
+  const steps=['парсинг телеметрии...','расчёт угла сноса...','оценка скорости...','анализ стабильности...','формирование отчёта...'];
+  let si=0;const stepEl=document.getElementById('loadStep');
+  const iv=setInterval(()=>{stepEl.textContent=steps[++si%steps.length]},1500);
+
+  try{
+    let scores,src;
+
+    if(tData){
+      scores=scoreFromTelem(tData);
+      src='telem';
+
+      const telemSummary=`
+РЕАЛЬНАЯ ТЕЛЕМЕТРИЯ (Assetto Corsa / Telemetrick):
+Машина: ${car} | Трасса: ${track}
+- Макс скорость: ${tData.maxSpeed.toFixed(0)} км/ч | Средняя: ${tData.avgSpeed.toFixed(0)} км/ч
+- Средний газ: ${tData.avgThrottle.toFixed(1)}% | Средний тормоз: ${tData.avgBrake.toFixed(1)}%
+- Средний угол сноса (задние): ${tData.avgSlipAngle.toFixed(1)}° | Макс: ${tData.maxSlipAngle.toFixed(1)}°
+- Средний боковой G: ${tData.avgLatG.toFixed(2)} | Макс: ${tData.maxLatG.toFixed(2)}
+- Слип колёс avg: ${tData.avgSlip.toFixed(2)} | max: ${tData.maxSlip.toFixed(2)}
+- Сэмплов: ${tData.samples}
+
+Оценки на основе данных:
+Траектория ${scores.trajectory} | Угол ${scores.angle} | Скорость ${scores.speed} | Стабильность ${scores.stability} | Итого ${scores.overall}`;
+
+      const res=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,
+          messages:[{role:'user',content:`Ты эксперт-судья по дрифту. ${telemSummary}
+
+Напиши разбор заезда на русском (4-5 предложений). Используй конкретные цифры из телеметрии. Укажи сильные стороны и что улучшить.
+
+Ответь ТОЛЬКО JSON без markdown:
+{"trajectory":${scores.trajectory},"angle":${scores.angle},"speed":${scores.speed},"stability":${scores.stability},"overall":${scores.overall},"breakdown":"текст"}`}]})
+      });
+      const d=await res.json();
+      const t=d.content.map(i=>i.text||'').join('').replace(/```json|```/g,'').trim();
+      scores={...scores,...JSON.parse(t)};
+
+    }else{
+      src='ai';
+      const res=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,
+          messages:[{role:'user',content:`Ты эксперт-судья по дрифту. Пилот ${pilot} на ${car}, трасса ${track}.
+Оцени заезд реалистично. Ответь ТОЛЬКО JSON:
+{"trajectory":число,"angle":число,"speed":число,"stability":число,"overall":число,"breakdown":"разбор 4-5 предложений"}`}]})
+      });
+      const d=await res.json();
+      const t=d.content.map(i=>i.text||'').join('').replace(/```json|```/g,'').trim();
+      scores=JSON.parse(t);
+    }
+
+    clearInterval(iv);
+    document.getElementById('loading').style.display='none';
+    showResult(scores,pilot,track,car,src);
+
+  }catch(err){
+    clearInterval(iv);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('analyzeBtn').disabled=false;
+    showErr('Ошибка: '+err.message);
+  }
+}
+
+function showResult(s,pilot,track,car,src){
+  if(!players[pilot])players[pilot]={mmr:1000,runs:0,best:0};
+  const p=players[pilot];
+  const delta=Math.round((s.overall-65)*1.5);
+  p.mmr=Math.max(0,p.mmr+delta);p.runs++;p.best=Math.max(p.best,s.overall);
+  localStorage.setItem('kds2_players',JSON.stringify(players));
+
+  const entry={id:history.length+1,pilot,track,car,scores:s,delta,mmr:p.mmr,src,
+    date:new Date().toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})};
+  history.unshift(entry);
+  localStorage.setItem('kds2_hist',JSON.stringify(history));
+
+  document.getElementById('rPilot').textContent=pilot;
+  document.getElementById('rMeta').textContent=`${track} · ${car} · ${entry.date}`;
+  document.getElementById('rScore').textContent=s.overall;
+
+  if(tData){
+    document.getElementById('telemStats').style.display='grid';
+    document.getElementById('tSpeed').textContent=tData.maxSpeed.toFixed(0);
+    document.getElementById('tThrottle').textContent=tData.avgThrottle.toFixed(0);
+    document.getElementById('tSlip').textContent=tData.avgSlipAngle.toFixed(1);
+    document.getElementById('tLatG').textContent=tData.avgLatG.toFixed(2);
+    document.getElementById('tSamples').textContent=tData.samples;
+  }else{document.getElementById('telemStats').style.display='none'}
+
+  setScore('T',s.trajectory);setScore('A',s.angle);setScore('S',s.speed);setScore('St',s.stability);
+  document.getElementById('rBreakdown').textContent=s.breakdown;
+  document.getElementById('srcTag').textContent=src==='telem'?'Реальная телеметрия':'AI оценка';
+  document.getElementById('srcTag').className='source-tag '+(src==='telem'?'source-telem':'source-ai');
+
+  const dEl=document.getElementById('mDelta');
+  dEl.textContent=(delta>=0?'+':'')+delta;
+  dEl.className='mmr-delta '+(delta>=0?'up':'down');
+  document.getElementById('mTotal').textContent=p.mmr;
+  document.getElementById('mRank').textContent=rank(p.mmr);
+
+  document.getElementById('result').style.display='block';
+  document.getElementById('result').scrollIntoView({behavior:'smooth'});
+  document.getElementById('hPilot').textContent=pilot;
+  document.getElementById('hMmr').textContent=p.mmr;
+  document.getElementById('hRuns').textContent=p.runs;
+  renderHist();
+  document.getElementById('analyzeBtn').disabled=false;
+}
+
+function setScore(k,v){
+  document.getElementById('s'+k).textContent=v;
+  setTimeout(()=>{document.getElementById('b'+k).style.width=v+'%'},100);
+}
+
+function rank(mmr){
+  if(mmr>=2500)return'LEGEND';if(mmr>=2000)return'MASTER';
+  if(mmr>=1600)return'EXPERT';if(mmr>=1300)return'PRO';
+  if(mmr>=1000)return'SEMI-PRO';if(mmr>=700)return'AMATEUR';return'ROOKIE';
+}
+
+function rowHtml(e,i){
+  return`<div class="run-row">
+    <span class="run-idx">${i+1}</span>
+    <div><div class="run-pilot">${e.pilot} <span class="source-tag ${e.src==='telem'?'source-telem':'source-ai'}" style="font-size:9px;padding:1px 5px">${e.src==='telem'?'T':'AI'}</span></div><div class="run-sub">${e.track}</div></div>
+    <span class="run-date">${e.date}</span>
+    <span class="run-score">${e.scores.overall}</span>
+    <span class="run-mmr">${e.mmr} MMR</span>
+  </div>`;
+}
+
+function renderHist(){
+  const el=document.getElementById('histList');
+  document.getElementById('runCount').textContent=history.length+' заездов';
+  el.innerHTML=history.length?history.slice(0,5).map(rowHtml).join(''):'<div class="empty">// нет данных</div>';
+}
+function renderFull(){
+  const el=document.getElementById('fullHistList');
+  el.innerHTML=history.length?history.map(rowHtml).join(''):'<div class="empty">// нет данных</div>';
+}
+function renderLb(){
+  const el=document.getElementById('lbList');
+  const sorted=Object.entries(players).map(([n,d])=>({n,...d})).sort((a,b)=>b.mmr-a.mmr);
+  if(!sorted.length){el.innerHTML='<div class="empty">// нет данных</div>';return}
+  const pc=['p1','p2','p3'];
+  el.innerHTML=sorted.map((p,i)=>`
+    <div class="lb-row">
+      <div class="lb-pos ${pc[i]||''}">${i+1}</div>
+      <div><div class="lb-name">${p.n}</div><div class="lb-sub">${p.runs} заездов · лучший: ${p.best}/100</div></div>
+      <div class="lb-best">${p.best}</div>
+      <div class="lb-mmr-col">${p.mmr} MMR<div class="lb-rank">${rank(p.mmr)}</div></div>
+    </div>`).join('');
+}
+function clearHistory(){if(!confirm('Очистить историю?'))return;history=[];localStorage.removeItem('kds2_hist');renderFull()}
+
+renderHist();
+</script>
+</body>
+</html>
