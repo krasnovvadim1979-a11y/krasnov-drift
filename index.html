@@ -397,7 +397,7 @@ label.slot-btn:hover{border-color:var(--text2);color:var(--text)}
 
 <script>
 // STATE
-let vFile=null, vB64=null, tData=null, lData=null;
+let vFile=null, tData=null, lData=null;
 let history=JSON.parse(localStorage.getItem('kds2_hist')||'[]');
 let players=JSON.parse(localStorage.getItem('kds2_players')||'{}');
 
@@ -563,10 +563,9 @@ function loadVideo(file){
   document.getElementById('videoName').textContent=file.name;
   document.getElementById('videoWrap').style.display='block';
   setSlot('Video','ok',file.name);
-  const r=new FileReader();r.onload=e=>{vB64=e.target.result.split(',')[1]};r.readAsDataURL(file);
   checkReady();
 }
-function clearVideo(){vFile=null;vB64=null;document.getElementById('videoWrap').style.display='none';document.getElementById('fileVideo').value='';setSlot('Video','','ожидание');checkReady()}
+function clearVideo(){vFile=null;document.getElementById('videoWrap').style.display='none';document.getElementById('fileVideo').value='';setSlot('Video','','ожидание');checkReady()}
 
 // UTILS
 function setSlot(name,state,msg){
@@ -625,16 +624,20 @@ async function analyze(){
   document.getElementById('loading').style.display='block';
   hideErr();
 
-  const steps=['парсинг телеметрии...','расчёт угла сноса...','оценка скорости...','анализ стабильности...','формирование отчёта...'];
+  const steps=['парсинг телеметрии...','извлечение кадров видео...','расчёт угла сноса...','оценка скорости...','анализ стабильности...','формирование отчёта...'];
   let si=0;const stepEl=document.getElementById('loadStep');
   const iv=setInterval(()=>{stepEl.textContent=steps[++si%steps.length]},1500);
 
   try{
     let scores,src;
+    let frames=[];
+    if(vFile){
+      try{frames=await extractFrames(vFile,4)}catch(e){console.warn('Кадры не извлечены:',e.message)}
+    }
 
     if(tData){
       scores=scoreFromTelem(tData);
-      src='telem';
+      src=frames.length?'telem+video':'telem';
 
       const telemSummary=`
 РЕАЛЬНАЯ ТЕЛЕМЕТРИЯ (Assetto Corsa / Telemetrick CSV):
@@ -650,17 +653,34 @@ async function analyze(){
 Оценки на основе данных:
 Траектория ${scores.trajectory} | Угол ${scores.angle} | Скорость ${scores.speed} | Стабильность ${scores.stability} | Итого ${scores.overall}`;
 
-      const prompt=`Ты эксперт-судья по дрифту. ${telemSummary}
+      const framesNote=frames.length?`\n\nК сообщению приложены ${frames.length} кадра из видео заезда (равномерно по времени). Используй их чтобы оценить визуально траекторию, позу машины и стиль, в дополнение к цифрам.`:'';
 
-Напиши разбор заезда на русском (4-5 предложений). Используй конкретные цифры из телеметрии. Укажи сильные стороны и что улучшить.
+      const prompt=`Ты эксперт-судья по дрифту. ${telemSummary}${framesNote}
+
+Напиши разбор заезда на русском (4-6 предложений). Используй конкретные цифры из телеметрии${frames.length?' и то что видно на кадрах':''}. Укажи сильные стороны и что улучшить.
 
 Ответь ТОЛЬКО JSON без markdown:
 {"trajectory":${scores.trajectory},"angle":${scores.angle},"speed":${scores.speed},"stability":${scores.stability},"overall":${scores.overall},"breakdown":"текст"}`;
-      const t=await callAI(prompt);
+
+      const t=frames.length?await callAIWithImages(prompt,frames):await callAI(prompt);
       const clean=t.replace(/```json|```/g,'').trim();
       const jsonMatch=clean.match(/\{[\s\S]*\}/);
       if(!jsonMatch)throw new Error('AI не вернул JSON');
       scores={...scores,...JSON.parse(jsonMatch[0])};
+
+    }else if(frames.length){
+      src='video';
+      const prompt3=`Ты эксперт-судья по дрифту. Пилот ${pilot} на машине ${car}, трасса ${track}.
+К сообщению приложены ${frames.length} кадра из видео заезда (равномерно по времени, в хронологическом порядке).
+Оцени заезд на основе того что видно на кадрах: траектория, угол сноса, динамика, стабильность.
+
+Ответь ТОЛЬКО JSON без markdown:
+{"trajectory":число,"angle":число,"speed":число,"stability":число,"overall":число,"breakdown":"разбор 4-6 предложений на русском, основанный на том что видно на кадрах"}`;
+      const t3=await callAIWithImages(prompt3,frames);
+      const clean3=t3.replace(/```json|```/g,'').trim();
+      const jsonMatch3=clean3.match(/\{[\s\S]*\}/);
+      if(!jsonMatch3)throw new Error('AI не вернул JSON');
+      scores=JSON.parse(jsonMatch3[0]);
 
     }else{
       src='ai';
@@ -713,8 +733,9 @@ function showResult(s,pilot,track,car,src){
 
   setScore('T',s.trajectory);setScore('A',s.angle);setScore('S',s.speed);setScore('St',s.stability);
   document.getElementById('rBreakdown').textContent=s.breakdown;
-  document.getElementById('srcTag').textContent=src==='telem'?'Реальная телеметрия':'AI оценка';
-  document.getElementById('srcTag').className='source-tag '+(src==='telem'?'source-telem':'source-ai');
+  const srcLabels={'telem':'Реальная телеметрия','telem+video':'Телеметрия + видео','video':'Анализ видео','ai':'AI оценка'};
+  document.getElementById('srcTag').textContent=srcLabels[src]||'AI оценка';
+  document.getElementById('srcTag').className='source-tag '+(src.startsWith('telem')?'source-telem':'source-ai');
 
   const dEl=document.getElementById('mDelta');
   dEl.textContent=(delta>=0?'+':'')+delta;
@@ -745,7 +766,7 @@ function rank(mmr){
 function rowHtml(e,i){
   return`<div class="run-row">
     <span class="run-idx">${i+1}</span>
-    <div><div class="run-pilot">${e.pilot} <span class="source-tag ${e.src==='telem'?'source-telem':'source-ai'}" style="font-size:9px;padding:1px 5px">${e.src==='telem'?'T':'AI'}</span></div><div class="run-sub">${e.track}</div></div>
+    <div><div class="run-pilot">${e.pilot} <span class="source-tag ${e.src.startsWith('telem')?'source-telem':'source-ai'}" style="font-size:9px;padding:1px 5px">${e.src==='telem'?'T':e.src==='telem+video'?'T+V':e.src==='video'?'V':'AI'}</span></div><div class="run-sub">${e.track}</div></div>
     <span class="run-date">${e.date}</span>
     <span class="run-score">${e.scores.overall}</span>
     <span class="run-mmr">${e.mmr} MMR</span>
@@ -781,24 +802,82 @@ function clearHistory(){if(!confirm('Очистить историю?'))return;h
 
 
 
-async function callAI(prompt){
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions',{
+async function extractFrames(videoFile, count=4){
+  return new Promise((resolve,reject)=>{
+    const video=document.createElement('video');
+    video.src=URL.createObjectURL(videoFile);
+    video.muted=true;
+    video.onloadedmetadata=()=>{
+      const duration=video.duration;
+      const canvas=document.createElement('canvas');
+      canvas.width=video.videoWidth;
+      canvas.height=video.videoHeight;
+      const ctx=canvas.getContext('2d');
+      const frames=[];
+      let idx=0;
+      const times=Array.from({length:count},(_, i)=>(duration*(i+1))/(count+1));
+
+      function captureNext(){
+        if(idx>=times.length){URL.revokeObjectURL(video.src);resolve(frames);return}
+        video.currentTime=times[idx];
+      }
+      video.onseeked=()=>{
+        ctx.drawImage(video,0,0,canvas.width,canvas.height);
+        frames.push(canvas.toDataURL('image/jpeg',0.7).split(',')[1]);
+        idx++;
+        captureNext();
+      };
+      video.onerror=()=>reject(new Error('Не удалось прочитать видео'));
+      captureNext();
+    };
+    video.onerror=()=>reject(new Error('Не удалось загрузить видео'));
+  });
+}
+
+async function callAIWithImages(prompt,images){
+  const content=[{type:'text',text:prompt}];
+  for(const img of images){
+    content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:img}});
+  }
+  const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{
       'Content-Type':'application/json',
-      'Authorization':'Bearer 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',
-      'HTTP-Referer':'https://krasnov.github.io',
-      'X-Title':'Krasnov Drift'
+      'x-api-key':'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',
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
     },
     body:JSON.stringify({
-      model:'openrouter/auto',
-      messages:[{role:'user',content:prompt}],
-      max_tokens:600
+      model:'claude-sonnet-4-6',
+      max_tokens:700,
+      messages:[{role:'user',content}]
+    })
+  });
+  const d=await res.json();
+  if(d.error)throw new Error(d.error.message||'API error');
+  const text=d.content?.map(c=>c.text||'').join('')||'';
+  if(!text)throw new Error('Пустой ответ от AI');
+  return text;
+}
+
+async function callAI(prompt){
+  const res = await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-api-key':'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',
+      'anthropic-version':'2023-06-01',
+      'anthropic-dangerous-direct-browser-access':'true'
+    },
+    body:JSON.stringify({
+      model:'claude-sonnet-4-6',
+      max_tokens:700,
+      messages:[{role:'user',content:prompt}]
     })
   });
   const d = await res.json();
   if(d.error)throw new Error(d.error.message||'API error');
-  const text = d.choices?.[0]?.message?.content||'';
+  const text = d.content?.map(c=>c.text||'').join('')||'';
   if(!text)throw new Error('Пустой ответ от AI');
   return text;
 }
@@ -807,7 +886,7 @@ async function callAI(prompt){
 function clearSlot(type){
   if(type==='log'){lData=null;document.getElementById('fileLog').value='';document.getElementById('fPilot').value='';document.getElementById('fTrack').value='';document.getElementById('fCar').value='';setSlot('Log','','ожидание')}
   if(type==='telem'){tData=null;document.getElementById('fileTelem').value='';setSlot('Telem','','ожидание')}
-  if(type==='video'){vFile=null;vB64=null;document.getElementById('fileVideo').value='';document.getElementById('videoWrap').style.display='none';setSlot('Video','','ожидание')}
+  if(type==='video'){vFile=null;document.getElementById('fileVideo').value='';document.getElementById('videoWrap').style.display='none';setSlot('Video','','ожидание')}
   checkReady();
 }
 
