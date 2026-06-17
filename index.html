@@ -242,10 +242,10 @@ label.slot-btn:hover{border-color:var(--text2);color:var(--text)}
         <div class="slot-dot" id="dotTelem"></div>
         <button class="slot-clear" id="clearTelem" onclick="clearSlot('telem')">✕ убрать</button>
         <div class="slot-type">Телеметрия</div>
-        <div class="slot-name">lap_N.txt</div>
-        <div class="slot-desc">Данные скорости, слипа, G-force, газа</div>
+        <div class="slot-name">Telemetrick CSV</div>
+        <div class="slot-desc">Файл .csv из папки exported (НЕ .ld/.ldx)</div>
         <label class="slot-btn" for="fileTelem">Выбрать файл</label>
-        <input type="file" id="fileTelem" accept=".txt,.csv" style="display:none" onchange="loadTelem(this.files[0])">
+        <input type="file" id="fileTelem" accept=".csv" style="display:none" onchange="loadTelem(this.files[0])">
         <div class="slot-status" id="statusTelem">ожидание</div>
       </div>
 
@@ -442,91 +442,115 @@ function loadLog(file){
   r.readAsText(file);
 }
 
-// LAP TXT
+// CSV TELEMETRY (Telemetrick named-column export)
 function loadTelem(file){
   if(!file)return;
   const r=new FileReader();
   r.onload=e=>{
-    tData=parseTelem(e.target.result,lData);
-    setSlot('Telem','ok',`${file.name} · ${tData.samples} сэмплов`);
-    checkReady();
+    try{
+      tData=parseTelemCSV(e.target.result);
+      if(tData.samples<5){
+        setSlot('Telem','err','Файл пустой или формат не распознан');
+        tData=null;checkReady();return;
+      }
+      setSlot('Telem','ok',`${file.name} · ${tData.samples} сэмплов · ${tData.duration.toFixed(0)}с`);
+      checkReady();
+    }catch(err){
+      setSlot('Telem','err','Ошибка чтения: '+err.message);
+      tData=null;checkReady();
+    }
   };
   r.readAsText(file);
 }
 
-function parseTelem(text, logData){
-  // Get channel order from log.json if available
-  const ch30=logData?.channelOrder?.['30']||[];
-  const ch50=logData?.channelOrder?.['50']||[];
+function parseTelemCSV(text){
+  const lines=text.split(/\r?\n/);
 
-  // Find indices
-  const idx=(arr,name)=>arr.indexOf(name);
+  // Find the real data header row (starts with "time,")
+  let headerIdx=-1;
+  for(let i=0;i<lines.length;i++){
+    if(lines[i].startsWith('time,')){headerIdx=i;break}
+  }
+  if(headerIdx===-1)throw new Error('Не найден заголовок данных (нет строки "time,...")');
 
-  // #30# channels (offset by 2: tag + timestamp)
-  const i30={
-    throttle: idx(ch30,'throttle'),
-    brake: idx(ch30,'brake'),
-    speed: idx(ch30,'speed'),
-    rpm: idx(ch30,'rpm'),
-    gear: idx(ch30,'gear'),
-    steer: idx(ch30,'steerAngle'),
-    slipFL: idx(ch30,'ndslipfl'),
-    slipFR: idx(ch30,'ndslipfr'),
-    slipRL: idx(ch30,'ndsliprl'),
-    slipRR: idx(ch30,'ndsliprr'),
-    slipAngFL: idx(ch30,'tireslipanglefl'),
-    slipAngFR: idx(ch30,'tireslipanglefr'),
-    slipAngRL: idx(ch30,'tireslipanglerl'),
-    slipAngRR: idx(ch30,'tireslipanglerr'),
+  const headers=lines[headerIdx].split(',').map(h=>h.trim());
+  const dataStart=headerIdx+2; // skip header + units row
+
+  // Map column name -> index, by exact Telemetrick CSV export names
+  const col=(name)=>headers.indexOf(name);
+  const IDX={
+    time:col('time'),
+    speed:col('Ground Speed'),
+    throttle:col('Throttle Pos'),
+    brake:col('Brake Pos'),
+    steer:col('Steering Angle'),
+    gear:col('Gear'),
+    rpm:col('Engine RPM'),
+    slipFL:col('Tire Slip Angle FL'),
+    slipFR:col('Tire Slip Angle FR'),
+    slipRL:col('Tire Slip Angle RL'),
+    slipRR:col('Tire Slip Angle RR'),
+    latG:col('CG Accel Lateral'),
+    lonG:col('CG Accel Longitudinal'),
+    lapInvalid:col('Lap Invalidated'),
   };
 
-  // #50# channels
-  const i50={
-    latG: idx(ch50,'cgaccellat'),
-    lonG: idx(ch50,'cgaccellong'),
-    steerTorque: idx(ch50,'steerTorque'),
+  const get=(parts,key)=>{
+    const i=IDX[key];
+    if(i<0||i>=parts.length)return 0;
+    const v=parseFloat(parts[i]);
+    return isNaN(v)?0:v;
   };
 
-  const speeds=[],throttles=[],brakes=[],slips=[],slipAngles=[],latGs=[],gears=[];
-  const lines=text.split('\n');
+  const speeds=[],throttles=[],brakes=[],steers=[],slipRears=[],slipFronts=[],latGs=[],lonGs=[],times=[];
 
-  for(const line of lines){
-    const p=line.trim().split(';');
-    if(p.length<3)continue;
-    try{
-      if(p[0]==='#30#'){
-        const get=(i)=>i>=0?parseFloat(p[i+2])||0:0;
-        speeds.push(Math.abs(get(i30.speed)));
-        throttles.push(get(i30.throttle));
-        brakes.push(get(i30.brake));
-        slips.push(Math.abs(get(i30.slipFL)));
-        slips.push(Math.abs(get(i30.slipRL)));
-        if(i30.slipAngRL>=0)slipAngles.push(Math.abs(get(i30.slipAngRL)));
-        if(i30.slipAngRR>=0)slipAngles.push(Math.abs(get(i30.slipAngRR)));
-        if(i30.gear>=0)gears.push(get(i30.gear));
-      }
-      if(p[0]==='#50#'){
-        const get=(i)=>i>=0?parseFloat(p[i+2])||0:0;
-        latGs.push(Math.abs(get(i50.latG)));
-      }
-    }catch(e){}
+  for(let i=dataStart;i<lines.length;i++){
+    const line=lines[i];
+    if(!line||!line.trim())continue;
+    const parts=line.split(',');
+    if(parts.length<150)continue; // skip malformed/short rows
+
+    const t=get(parts,'time');
+    if(isNaN(t))continue;
+
+    times.push(t);
+    speeds.push(Math.abs(get(parts,'speed')));
+    throttles.push(get(parts,'throttle')); // already 0-100
+    brakes.push(get(parts,'brake'));
+    steers.push(Math.abs(get(parts,'steer')));
+
+    const rl=Math.abs(get(parts,'slipRL'));
+    const rr=Math.abs(get(parts,'slipRR'));
+    const fl=Math.abs(get(parts,'slipFL'));
+    const fr=Math.abs(get(parts,'slipFR'));
+    slipRears.push((rl+rr)/2);
+    slipFronts.push((fl+fr)/2);
+
+    latGs.push(Math.abs(get(parts,'latG')));
+    lonGs.push(Math.abs(get(parts,'lonG')));
   }
 
   const avg=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
   const max=a=>a.length?Math.max(...a):0;
+  const duration=times.length?Math.max(...times)-Math.min(...times):0;
 
   return{
     samples:speeds.length,
+    duration,
     maxSpeed:max(speeds),
-    avgSpeed:avg(speeds),
-    avgThrottle:avg(throttles)*100,
-    avgBrake:avg(brakes)*100,
-    maxSlip:max(slips),
-    avgSlip:avg(slips),
-    maxSlipAngle:max(slipAngles),
-    avgSlipAngle:avg(slipAngles),
+    avgSpeed:avg(speeds.filter(s=>s>3)), // exclude standstill from average
+    avgThrottle:avg(throttles),
+    avgBrake:avg(brakes),
+    maxSlip:max(slipRears), // kept for backward compat with scoring fn
+    avgSlip:avg(slipRears),
+    maxSlipAngle:max(slipRears),
+    avgSlipAngle:avg(slipRears),
+    maxSlipFront:max(slipFronts),
+    avgSlipFront:avg(slipFronts),
     avgLatG:avg(latGs),
     maxLatG:max(latGs),
+    avgLonG:avg(lonGs),
+    maxSteer:max(steers),
   };
 }
 
@@ -613,14 +637,15 @@ async function analyze(){
       src='telem';
 
       const telemSummary=`
-РЕАЛЬНАЯ ТЕЛЕМЕТРИЯ (Assetto Corsa / Telemetrick):
+РЕАЛЬНАЯ ТЕЛЕМЕТРИЯ (Assetto Corsa / Telemetrick CSV):
 Машина: ${car} | Трасса: ${track}
-- Макс скорость: ${tData.maxSpeed.toFixed(0)} км/ч | Средняя: ${tData.avgSpeed.toFixed(0)} км/ч
+- Длительность заезда: ${tData.duration.toFixed(1)} сек | Сэмплов: ${tData.samples}
+- Макс скорость: ${tData.maxSpeed.toFixed(0)} км/ч | Средняя в движении: ${tData.avgSpeed.toFixed(0)} км/ч
 - Средний газ: ${tData.avgThrottle.toFixed(1)}% | Средний тормоз: ${tData.avgBrake.toFixed(1)}%
-- Средний угол сноса (задние): ${tData.avgSlipAngle.toFixed(1)}° | Макс: ${tData.maxSlipAngle.toFixed(1)}°
+- Средний угол сноса задних колёс: ${tData.avgSlipAngle.toFixed(1)}° | Макс: ${tData.maxSlipAngle.toFixed(1)}°
+- Средний угол передних колёс: ${tData.avgSlipFront.toFixed(1)}°
 - Средний боковой G: ${tData.avgLatG.toFixed(2)} | Макс: ${tData.maxLatG.toFixed(2)}
-- Слип колёс avg: ${tData.avgSlip.toFixed(2)} | max: ${tData.maxSlip.toFixed(2)}
-- Сэмплов: ${tData.samples}
+- Средний продольный G: ${tData.avgLonG.toFixed(2)}
 
 Оценки на основе данных:
 Траектория ${scores.trajectory} | Угол ${scores.angle} | Скорость ${scores.speed} | Стабильность ${scores.stability} | Итого ${scores.overall}`;
@@ -631,18 +656,22 @@ async function analyze(){
 
 Ответь ТОЛЬКО JSON без markdown:
 {"trajectory":${scores.trajectory},"angle":${scores.angle},"speed":${scores.speed},"stability":${scores.stability},"overall":${scores.overall},"breakdown":"текст"}`;
-      const t=await callGemini(prompt);
-      const clean=t.replace(/\`\`\`json|\`\`\`/g,'').trim();
-      scores={...scores,...JSON.parse(clean)};
+      const t=await callAI(prompt);
+      const clean=t.replace(/```json|```/g,'').trim();
+      const jsonMatch=clean.match(/\{[\s\S]*\}/);
+      if(!jsonMatch)throw new Error('AI не вернул JSON');
+      scores={...scores,...JSON.parse(jsonMatch[0])};
 
     }else{
       src='ai';
       const prompt2=`Ты эксперт-судья по дрифту. Пилот ${pilot} на ${car}, трасса ${track}.
 Оцени заезд реалистично. Ответь ТОЛЬКО JSON без markdown:
 {"trajectory":число,"angle":число,"speed":число,"stability":число,"overall":число,"breakdown":"разбор 4-5 предложений"}`;
-      const t2=await callGemini(prompt2);
-      const clean2=t2.replace(/\`\`\`json|\`\`\`/g,'').trim();
-      scores=JSON.parse(clean2);
+      const t2=await callAI(prompt2);
+      const clean2=t2.replace(/```json|```/g,'').trim();
+      const jsonMatch2=clean2.match(/\{[\s\S]*\}/);
+      if(!jsonMatch2)throw new Error('AI не вернул JSON');
+      scores=JSON.parse(jsonMatch2[0]);
     }
 
     clearInterval(iv);
@@ -752,14 +781,26 @@ function clearHistory(){if(!confirm('Очистить историю?'))return;h
 
 
 
-async function callGemini(prompt){
-  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyAQ.Ab8RN6JqDr-o3HY2yU6W-Zb74nolzH4WoCERBC4anHd_R9cyIg',{
+async function callAI(prompt){
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions',{
     method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer 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',
+      'HTTP-Referer':'https://krasnov.github.io',
+      'X-Title':'Krasnov Drift'
+    },
+    body:JSON.stringify({
+      model:'openrouter/auto',
+      messages:[{role:'user',content:prompt}],
+      max_tokens:600
+    })
   });
   const d = await res.json();
-  return d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  if(d.error)throw new Error(d.error.message||'API error');
+  const text = d.choices?.[0]?.message?.content||'';
+  if(!text)throw new Error('Пустой ответ от AI');
+  return text;
 }
 
 
